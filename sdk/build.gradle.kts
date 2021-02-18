@@ -44,7 +44,9 @@ android {
 
 dependencies {
   api(Dependencies.mapboxBase)
-  api(Dependencies.mapboxOkHttp)
+  api(Dependencies.mapboxOkHttp) {
+    exclude(module = "com.mapbox.common" )
+  }
   implementation(Dependencies.mapboxAnnotations)
   api(project(":sdk-base"))
   implementation(project(":module-telemetry"))
