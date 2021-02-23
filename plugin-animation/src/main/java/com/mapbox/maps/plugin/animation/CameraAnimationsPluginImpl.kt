@@ -2,7 +2,6 @@ package com.mapbox.maps.plugin.animation
 
 import android.animation.Animator
 import android.animation.AnimatorSet
-import android.animation.TimeInterpolator
 import android.animation.ValueAnimator
 import android.os.Build
 import com.mapbox.common.Logger
@@ -23,8 +22,7 @@ import kotlin.properties.Delegates
  *   If some another animation with same [CameraAnimator.type] is about to start previous one will be cancelled.
  *   - Giving possibility to listen to [CameraOptions] values changes during animations via listeners.
  *
- * [CameraAnimationsPluginImpl] is NOT thread-safe meaning all animations must be started from one thread.
- * However, it doesn't have to be the UI thread.
+ * [CameraAnimationsPluginImpl] is NOT thread-safe meaning all animations must be started from UI thread.
  */
 
 internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
@@ -144,6 +142,7 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
 
   private fun performMapJump(cameraOptions: CameraOptions) {
     // move native map to new position
+    Logger.e("KIRYLDD", "jumpTo")
     mapTransformDelegate.jumpTo(cameraOptions)
     // notify listeners with actual values
     notifyListeners(cameraOptions)
@@ -322,20 +321,6 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
       updateCameraValue(animator)
       // add current animator to queue-set if was not present
       runningAnimatorsQueue.add(it)
-    }
-  }
-
-  private fun startAnimatorSet(
-    animatorSet: AnimatorSet,
-    animatorOwner: String?,
-    animatorListener: Animator.AnimatorListener?
-  ) {
-    cancelAnimatorSet()
-    animatorListener?.let {
-      animatorSet.addListener(it)
-    }
-    highLevelAnimatorSet = HighLevelAnimatorSet(animatorOwner, animatorSet).also {
-      it.animatorSet.start()
     }
   }
 
@@ -550,15 +535,10 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     cameraOptions: CameraOptions,
     animationOptions: MapAnimationOptions?
   ) {
-    val animators = cameraAnimationsFactory.getEaseTo(cameraOptions)
-    val animatorSet = registerInternalAnimators(
-      animators,
-      animationOptions?.owner,
-      animationOptions?.duration,
-      animationOptions?.interpolator,
-      true
+    startHighLevelAnimation(
+      cameraAnimationsFactory.getEaseTo(cameraOptions),
+      animationOptions
     )
-    startAnimatorSet(animatorSet, animationOptions?.owner, animationOptions?.animatorListener)
   }
 
   /**
@@ -571,15 +551,10 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     screenCoordinate: ScreenCoordinate,
     animationOptions: MapAnimationOptions?
   ) {
-    val animators = cameraAnimationsFactory.getMoveBy(screenCoordinate)
-    val animatorSet = registerInternalAnimators(
-      animators,
-      animationOptions?.owner,
-      animationOptions?.duration,
-      animationOptions?.interpolator,
-      true
+    startHighLevelAnimation(
+      cameraAnimationsFactory.getMoveBy(screenCoordinate),
+      animationOptions
     )
-    startAnimatorSet(animatorSet, animationOptions?.owner, animationOptions?.animatorListener)
   }
 
   /**
@@ -607,15 +582,10 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     screenCoordinate: ScreenCoordinate?,
     animationOptions: MapAnimationOptions?
   ) {
-    val animators = cameraAnimationsFactory.getScaleBy(amount, screenCoordinate)
-    val animatorSet = registerInternalAnimators(
-      animators,
-      animationOptions?.owner,
-      animationOptions?.duration,
-      animationOptions?.interpolator,
-      true
+    startHighLevelAnimation(
+      cameraAnimationsFactory.getScaleBy(amount, screenCoordinate),
+      animationOptions
     )
-    startAnimatorSet(animatorSet, animationOptions?.owner, animationOptions?.animatorListener)
   }
 
   /**
@@ -639,15 +609,10 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     second: ScreenCoordinate,
     animationOptions: MapAnimationOptions?
   ) {
-    val animators = cameraAnimationsFactory.getRotateBy(first, second)
-    val animatorSet = registerInternalAnimators(
-      animators,
-      animationOptions?.owner,
-      animationOptions?.duration,
-      animationOptions?.interpolator,
-      true
+    startHighLevelAnimation(
+      cameraAnimationsFactory.getRotateBy(first, second),
+      animationOptions
     )
-    startAnimatorSet(animatorSet, animationOptions?.owner, animationOptions?.animatorListener)
   }
 
   /**
@@ -660,15 +625,10 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     pitch: Double,
     animationOptions: MapAnimationOptions?
   ) {
-    val animators = cameraAnimationsFactory.getPitchBy(pitch)
-    val animatorSet = registerInternalAnimators(
-      animators,
-      animationOptions?.owner,
-      animationOptions?.duration,
-      animationOptions?.interpolator,
-      true
+    startHighLevelAnimation(
+      cameraAnimationsFactory.getPitchBy(pitch),
+      animationOptions
     )
-    startAnimatorSet(animatorSet, animationOptions?.owner, animationOptions?.animatorListener)
   }
 
   /**
@@ -688,15 +648,10 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     cameraOptions: CameraOptions,
     animationOptions: MapAnimationOptions?
   ) {
-    val animators = cameraAnimationsFactory.getFlyTo(cameraOptions)
-    val animatorSet = registerInternalAnimators(
-      animators,
-      animationOptions?.owner,
-      animationOptions?.duration,
-      animationOptions?.interpolator,
-      true
+    startHighLevelAnimation(
+      cameraAnimationsFactory.getFlyTo(cameraOptions),
+      animationOptions
     )
-    startAnimatorSet(animatorSet, animationOptions?.owner, animationOptions?.animatorListener)
   }
 
   override fun createZoomAnimator(
@@ -738,19 +693,18 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     val cameraAnimators = mutableListOf<CameraAnimator<*>>()
     for (cameraAnimator in animators) {
       if (cameraAnimator is CameraAnimator<*>) {
+        cameraAnimator.isInternal = true
+        cameraAnimator.owner = MapAnimationOwnerRegistry.INTERNAL
         cameraAnimators.add(cameraAnimator)
       } else {
         Logger.e(TAG, "All animators must be CameraAnimator's to be played together!")
       }
     }
-    val animatorSet = registerInternalAnimators(
-      cameraAnimators.toTypedArray(),
-      MapAnimationOwnerRegistry.INTERNAL,
-      null,
-      null,
-      true
-    )
-    animatorSet.start()
+    registerAnimators(*animators)
+    AnimatorSet().apply {
+      playTogether(*animators)
+      start()
+    }
   }
 
   /**
@@ -762,42 +716,44 @@ internal class CameraAnimationsPluginImpl : CameraAnimationsPlugin {
     val cameraAnimators = mutableListOf<CameraAnimator<*>>()
     for (cameraAnimator in animators) {
       if (cameraAnimator is CameraAnimator<*>) {
+        cameraAnimator.isInternal = true
+        cameraAnimator.owner = MapAnimationOwnerRegistry.INTERNAL
         cameraAnimators.add(cameraAnimator)
       } else {
         Logger.e(TAG, "All animators must be CameraAnimator's to be played sequentially!")
       }
     }
-    val animatorSet =
-      registerInternalAnimators(
-        cameraAnimators.toTypedArray(),
-        MapAnimationOwnerRegistry.INTERNAL,
-        null,
-        null,
-        false
-      )
-    animatorSet.start()
+    registerAnimators(*animators)
+    AnimatorSet().apply {
+      playSequentially(*animators)
+      start()
+    }
   }
 
-  private fun registerInternalAnimators(
-    animators: Array<out CameraAnimator<*>>,
-    owner: String?,
-    durationNew: Long?,
-    interpolatorNew: TimeInterpolator?,
-    together: Boolean
-  ): AnimatorSet {
+  private fun startHighLevelAnimation(
+    animators: Array<CameraAnimator<*>>,
+    animationOptions: MapAnimationOptions?
+  ) {
     animators.forEach {
       it.isInternal = true
-      it.owner = owner
+      it.owner = animationOptions?.owner
     }
     registerAnimators(*animators)
-    return AnimatorSet().apply {
-      durationNew?.let {
-        this.duration = it
+    val animatorSet = AnimatorSet().apply {
+      animationOptions?.duration?.let {
+        duration = it
       }
-      interpolatorNew?.let {
-        this.interpolator = it
+      animationOptions?.interpolator?.let {
+        interpolator = it
       }
-      if (together) playTogether(*animators) else playSequentially(*animators)
+      animationOptions?.animatorListener?.let {
+        this.addListener(it)
+      }
+      playTogether(*animators)
+    }
+    cancelAnimatorSet()
+    highLevelAnimatorSet = HighLevelAnimatorSet(animationOptions?.owner, animatorSet).also {
+      it.animatorSet.start()
     }
   }
 
